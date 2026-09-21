@@ -1,0 +1,95 @@
+#sidebar-collapse-toggle {
+  display: none;
+}
+
+/* Match Chirpy's desktop sidebar breakpoint. */
+@media (min-width: 850px) {
+  #sidebar-collapse-toggle:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    bottom: 1.5rem;
+    left: 212px;
+    z-index: 1050;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--sidebar-border-color);
+    border-radius: 8px;
+    color: var(--text-color);
+    background: var(--sidebar-bg);
+    cursor: pointer;
+  }
+
+  #sidebar-collapse-toggle:hover {
+    background: var(--sidebar-hover-bg);
+  }
+
+  #sidebar .sidebar-bottom {
+    padding-right: 60px;
+  }
+
+  #sidebar-collapse-toggle:focus-visible {
+    outline: 2px solid var(--link-color);
+    outline-offset: 2px;
+  }
+
+  html[data-sidebar-collapsed] #sidebar {
+    transform: translateX(-100%);
+    visibility: hidden;
+  }
+
+  html[data-sidebar-collapsed] #main-wrapper {
+    margin-left: 0;
+  }
+
+  /* Remove the theme's capped container so the freed space reaches the text. */
+  html[data-sidebar-collapsed] #main-wrapper > .container {
+    width: 100%;
+    max-width: none;
+  }
+
+  html[data-sidebar-collapsed] #main-wrapper > .container main,
+  html[data-sidebar-collapsed] #tail-wrapper {
+    flex: 0 0 100%;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  html[data-sidebar-collapsed] #sidebar-collapse-toggle {
+    left: 12px;
+  }
+
+  html[data-sidebar-collapsed] #sidebar-collapse-toggle .sidebar-toggle-pane {
+    opacity: 0;
+  }
+}
+
+@media (min-width: 1200px) {
+  /* Keep the directory panel compact; give the remaining width to the article. */
+  html[data-sidebar-collapsed] #panel-wrapper {
+    flex: 0 0 260px;
+    width: 260px;
+    max-width: 260px;
+  }
+
+  html[data-sidebar-collapsed] #main-wrapper > .container main,
+  html[data-sidebar-collapsed] #tail-wrapper {
+    flex-basis: calc(100% - 260px);
+    width: calc(100% - 260px);
+    max-width: calc(100% - 260px);
+  }
+}
+
+/* Chirpy widens the sidebar from 260px to 300px on large screens. */
+@media (min-width: 1650px) {
+  #sidebar-collapse-toggle:not([hidden]) {
+    left: 252px;
+  }
+
+  html[data-sidebar-collapsed] #sidebar-collapse-toggle:not([hidden]) {
+    left: 12px;
+  }
+}

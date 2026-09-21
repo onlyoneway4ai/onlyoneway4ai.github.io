@@ -3,10 +3,9 @@ title: Modern C++
 description: 以 C++ Core Guidelines 为主线整理现代 C++ 工程实践，重点覆盖类型安全、资源与生命周期、接口设计、移动语义、并发、错误处理和性能。
 date: 2022-09-17
 categories:
-  - 技术分享
+  - 编程语言
 tags:
-  - C++
-  - Modern C++
+  - CPP
 mermaid: true
 published: true
 toc: true

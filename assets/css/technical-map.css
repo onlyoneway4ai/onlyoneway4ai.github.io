@@ -1,0 +1,33 @@
+/* This stylesheet is loaded only on the technical map page. */
+#panel-wrapper { display: none; }
+#main-wrapper > .container main { flex: 0 0 100%; width: 100%; max-width: 100%; }
+/* This page has no directory panel, so do not reserve the article layout's
+   260px panel space when the navigation is collapsed. */
+html[data-sidebar-collapsed] #main-wrapper > .container main,
+html[data-sidebar-collapsed] #tail-wrapper {
+  flex: 0 0 100%;
+  width: 100%;
+  max-width: 100%;
+}
+.technical-map { border: 1px solid var(--sidebar-border-color, #ddd); border-radius: 16px; overflow: hidden; background: var(--main-bg); }
+.ability-canvas { height: clamp(460px, 64vh, 760px); overflow: hidden; touch-action: none; cursor: grab; background-image: radial-gradient(var(--sidebar-border-color, #ddd) 1px, transparent 1px); background-size: 20px 20px; }
+.ability-canvas.is-dragging { cursor: grabbing; }
+.ability-canvas svg { width: 100%; height: 100%; display: block; user-select: none; }
+.ability-edge { fill: none; stroke: var(--branch-color); stroke-width: 1.4; opacity: .45; }
+.ability-edge.is-primary { stroke-width: 2.2; opacity: .7; }
+.ability-node rect { fill: var(--main-bg, #fff); stroke: var(--branch-color); stroke-width: 1; stroke-opacity: .65; }
+.ability-node text { fill: var(--text-color, #333); font: 14px system-ui, sans-serif; }
+.ability-node.is-category rect { fill: color-mix(in srgb, var(--branch-color) 13%, var(--main-bg, #fff)); stroke-width: 1.5; stroke-opacity: 1; }
+.ability-node.is-category text { font-size: 15px; font-weight: 600; }
+.ability-node.is-root rect { fill: #365b8c; stroke: #365b8c; stroke-width: 2; stroke-opacity: 1; filter: drop-shadow(0 3px 5px rgb(30 60 100 / 18%)); }
+.ability-node.is-root text { fill: #fff; font-size: 18px; font-weight: 600; }
+.ability-canvas:focus-visible, .ability-toolbar button:focus-visible { outline: 2px solid var(--link-color); outline-offset: -3px; }
+.ability-source { padding: 1rem; }
+.ability-source .technical-map-category { margin-top: 1rem; }
+.ability-source .ability-tag { display: inline-block; margin: .3rem; padding: .4rem .7rem; background: var(--sidebar-bg); border-radius: 8px; }
+.content .technical-map .ability-toolbar { margin: 12px 12px 10px auto; }
+.content .technical-map .ability-toolbar[hidden] { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .content .technical-map:hover .ability-toolbar,
+  .content .technical-map:has(.ability-canvas:focus-visible) .ability-toolbar { opacity: 1; }
+}

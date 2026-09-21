@@ -1,23 +1,23 @@
 theme: jekyll-theme-chirpy
 
-url: "https://alanwi.github.io"
+url: "https://onlyoneway4ai.github.io"
 baseurl: ""
 lang: zh-CN
 timezone: Asia/Shanghai
 
-title: wwei's Blog
+title: One Way的博客
 tagline: 学习 · 项目 · 生活
 description: >-
   一万年太久，只争朝夕。
 
 social:
-  name: wwei
+  name: one way
   email: ""
   links:
-    - https://github.com/AlanWi
+    - https://github.com/onlyoneway4ai
 
 github:
-  username: AlanWi
+  username: onlyoneway4ai
 
 avatar: /assets/img/avatar.jpg
 
@@ -84,6 +84,7 @@ defaults:
     values:
       layout: post
       toc: true
+      math: true
       permalink: /posts/:title/
   - scope:
       path: assets/img/favicons

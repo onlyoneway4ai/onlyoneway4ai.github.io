@@ -1,5 +1,13 @@
 <!-- The Side Bar -->
 
+<button id="sidebar-collapse-toggle" type="button" hidden aria-controls="sidebar" aria-expanded="true" aria-label="折叠导航栏" title="折叠导航栏">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+    <rect x="2" y="3" width="20" height="18" rx="2" />
+    <path d="M9 3v18" />
+    <rect class="sidebar-toggle-pane" x="3" y="4" width="5" height="16" fill="currentColor" stroke="none" opacity="0.25" />
+  </svg>
+</button>
+
 <aside aria-label="Sidebar" id="sidebar" class="d-flex flex-column align-items-end">
   <header class="profile-wrapper">
     <a href="{{ '/' | relative_url }}" id="avatar" class="rounded-circle">
@@ -34,7 +42,7 @@
             <i class="fa-fw {{ tab.icon }}"></i>
             {% capture tab_name %}{{ tab.url | split: '/' }}{% endcapture %}
 
-            <span>{{ site.data.locales[include.lang].tabs.[tab_name] | default: tab.title | upcase }}</span>
+            <span>{% if tab.nav_title %}{{ tab.nav_title | escape }}{% elsif tab.technical_map %}{{ tab.title }}{% else %}{{ site.data.locales[include.lang].tabs.[tab_name] | default: tab.title | upcase }}{% endif %}</span>
           </a>
         </li>
         <!-- .nav-item -->

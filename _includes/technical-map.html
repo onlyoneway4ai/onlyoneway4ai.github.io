@@ -1,0 +1,39 @@
+{% assign published_posts = site.posts | where_exp: 'post', 'post.published != false' | where_exp: 'post', 'post.date <= site.time' %}
+<p class="text-muted">我的技术学习与实践方向，按分类与标签整理。</p>
+{% if published_posts.size > 0 %}
+<section class="technical-map" aria-label="个人能力导图">
+  <div class="ability-toolbar mermaid-controls" role="group" aria-label="导图缩放" hidden>
+    <button type="button" data-map-action="out" aria-label="缩小" title="缩小"></button>
+    <span role="status" aria-live="polite">100%</span>
+    <button type="button" data-map-action="in" aria-label="放大" title="放大"></button>
+    <span class="mermaid-controls-divider" aria-hidden="true"></span>
+    <button type="button" data-map-action="fit" aria-label="适应画布" title="适应画布"></button>
+    <button type="button" data-map-action="reset" aria-label="重置" title="重置为 100%"></button>
+  </div>
+  <div class="ability-canvas" hidden tabindex="0" aria-label="个人能力导图，方向键移动画布，加减键缩放"></div>
+  <div class="ability-source">
+  <div class="technical-map-root">个人能力</div>
+  <div class="technical-map-branches">
+    {% assign categories = site.categories | sort %}
+    {% for category in categories %}
+      {% assign category_posts = category[1] | where_exp: 'post', 'post.published != false' | where_exp: 'post', 'post.date <= site.time' %}
+      {% if category_posts.size == 0 %}{% continue %}{% endif %}
+      {% assign category_tags = '' | split: ',' %}
+      {% for post in category_posts %}{% assign category_tags = category_tags | concat: post.tags %}{% endfor %}
+      {% assign category_tags = category_tags | uniq | sort_natural %}
+      <section class="technical-map-category" aria-labelledby="map-category-{{ forloop.index }}">
+        <h2 id="map-category-{{ forloop.index }}">{{ category[0] | escape }}</h2>
+        <div class="technical-map-tags">
+          {% for tag in category_tags %}
+            <span class="ability-tag">{{ tag | escape }}</span>
+          {% endfor %}
+
+        </div>
+      </section>
+    {% endfor %}
+  </div>
+</div>
+</section>
+{% else %}
+<p class="text-muted">正在整理技术笔记，文章发布后会自动出现在这里。</p>
+{% endif %}

@@ -1,2061 +1,1617 @@
 ---
-title: Git
-description:
+title: Git Guidelines
+description: 通过状态模型、分支协作、历史整合、冲突处理和故障恢复，快速上手日常项目中的 Git 使用、诊断与恢复能力。
 date: 2022-07-09
 categories:
-  - 技术分享
+  - 版本控制
 tags:
   - Git
-  - 版本控制
 mermaid: true
 published: true
 toc: true
 ---
-## 0. Cheatsheet
-### 0.1 完整 Feature 开发流程
 
-更新主分支：
+## Git 的状态模型
 
-```bash
-git switch main
-git pull --ff-only
+使用 Git 时，最重要的不是大量命令，而是重新建立下面几个判断：
+
+- 当前 `HEAD` 在哪里？
+- 当前分支指向哪个 commit？
+- working tree 中有哪些修改？
+- index 中已经准备了哪些修改？
+- 本地分支和 remote-tracking branch 有什么差异？
+- 接下来执行的命令会改变哪一层状态？
+- 如果操作错误，能否恢复？
+
+Git 日常开发中最重要的几层状态可以表示为：
+
+```mermaid
+flowchart LR
+    WT["Working Tree<br/>当前正在编辑的文件"]
+    IDX["Index / Staging Area<br/>下一次 commit 的内容"]
+    HEAD["HEAD Commit<br/>当前提交快照"]
+    RT["Remote-Tracking Branch<br/>例如 origin/main"]
+    REMOTE["Remote Repository<br/>GitHub / GitLab 等"]
+
+    WT -->|"git add"| IDX
+    IDX -->|"git commit"| HEAD
+    REMOTE -->|"git fetch"| RT
+    RT -->|"merge / rebase"| HEAD
+    HEAD -->|"git push"| REMOTE
 ```
 
-创建 Feature Branch：
+其中最容易混淆的是 working tree、index 和 `HEAD`。
+
+Git 官方文档将 index 也称为 staging area，它保存的是准备进入下一次 commit 的内容。因此：
 
 ```bash
-git switch -c feature/scheduler-batching
+git add file.cpp
 ```
 
-开发并检查：
+并不是简单地“标记这个文件需要提交”，而是把这个文件**当前的内容**加入 index。如果之后继续修改该文件，需要再次执行 `git add`，新修改才会进入下一次 commit。
+
+检查这三层状态时最常用：
 
 ```bash
 git status
 git diff
+git diff --staged
 ```
 
-整理 Staging Area：
+它们分别回答不同问题。
 
-```bash
-git add -p
-git diff --cached
-```
-
-Commit：
-
-```bash
-git commit
-```
-
-准备同步 Main：
-
-```bash
-git fetch origin
-git rebase origin/main
-```
-
-发生冲突时：
-
-```bash
-git status
-git add <resolved-files>
-git rebase --continue
-```
-
-需要整理 Commit 时：
-
-```bash
-git rebase -i origin/main
-```
-
-首次 Push：
-
-```bash
-git push -u origin feature/scheduler-batching
-```
-
-如果之前已经 Push，并且明确允许改写自己的 Feature Branch：
-
-```bash
-git push --force-with-lease
-```
-
-然后进入：
-
-```mermaid
-flowchart LR
-    A["PR / MR"] --> B["CI"]
-    B --> C["Code Review"]
-    C --> D["Update if Needed"]
-    D --> B
-    C --> E["Merge"]
-    E --> F["Delete Feature Branch"]
-```
-### 0.2 常用命令速查
-
-#### Repository 状态
-
-```bash
-git status
-git diff
-git diff --cached
-git log --oneline --graph --decorate --all
-```
-
-#### Branch
-
-```bash
-git branch
-git switch main
-git switch -c feature/foo
-```
-
-#### Commit
-
-```bash
-git add <file>
-git add -p
-git commit
-git commit --amend
-```
-
-#### Remote
-
-```bash
-git fetch origin
-git pull --ff-only
-git push
-git push -u origin <branch>
-git push --force-with-lease
-```
-
-#### History
-
-```bash
-git merge <branch>
-git rebase origin/main
-git rebase -i origin/main
-git cherry-pick <commit>
-```
-
-#### Conflict
-
-```bash
-git status
-git merge --abort
-git rebase --continue
-git rebase --abort
-```
-
-#### Undo
-
-```bash
-git restore <file>
-git restore --staged <file>
-git reset HEAD~1
-git reset --soft HEAD~1
-git reset --hard HEAD~1
-git revert <commit>
-git reflog
-```
-
-#### Debug
-
-```bash
-git show <commit>
-git blame <file>
-git bisect start
-```
-
-### 0.3 常见误操作恢复
-
-| 情况 | 常见处理 |
-|---|---|
-| 修改文件后想取消 | `git restore <file>` |
-| Staged 错文件 | `git restore --staged <file>` |
-| Commit Message 写错 | `git commit --amend` |
-| 漏文件到上一 Commit | `git add` 后 `git commit --amend` |
-| 本地 Commit 不想保留，但需要保留修改 | `git reset HEAD~1` |
-| 本地 Commit 和修改都不要 | 谨慎使用 `git reset --hard HEAD~1` |
-| 公共 Branch 出现错误 Commit | `git revert` |
-| Rebase 做错 | `git rebase --abort` 或 `git reflog` |
-| Merge 做错 | `git merge --abort` |
-| Reset 到错误位置 | `git reflog` |
-| Branch 被误删 | 根据 Commit / Reflog 恢复 |
-
-误操作后不要连续执行大量不理解的恢复命令。
-
-优先检查：
-
-```bash
-git status
-git log --oneline --graph --decorate --all
-git reflog
-```
-
-先明确当前 Repository 状态。
-
----
-## 1. Git 在生产环境中的定位
-
-学习 Git 不需要记住所有命令，更重要的是建立正确的心智模型，并理解团队协作中的安全边界。
-
-实际开发中最重要的是：
-
-- Git 如何记录版本。
-- Working Tree、Index、HEAD 分别是什么。
-- Branch 和 Commit 的本质是什么。
-- `merge` 和 `rebase` 如何影响提交历史。
-- 哪些历史可以修改，哪些共享历史不应该修改。
-- 如何安全撤销修改。
-- 如何解决冲突。
-- 如何从误操作中恢复。
-- Git 如何与 PR / MR、Code Review、CI 和分支保护共同组成生产工作流。
-
-大型团队常见开发流程如下：
-
-```mermaid
-flowchart LR
-    A["更新 main"] --> B["创建 Feature Branch"]
-    B --> C["本地开发"]
-    C --> D["Commit"]
-    D --> E["Push Feature Branch"]
-    E --> F["创建 PR / MR"]
-    F --> G["Code Review"]
-    G --> H["CI / Tests"]
-    H --> I["Merge Queue / Merge"]
-    I --> J["Protected main"]
-```
-
-核心原则是：
-
-> Feature Branch 可以在明确边界内整理历史，共享分支优先保证安全、可审计和可恢复。
-
----
-
-## 2. Git 的三个核心区域
-
-理解 Git 时，可以先建立三个区域的模型：
-
-```mermaid
-flowchart LR
-    A["Working Tree<br/>正在编辑的文件"] -->|"git add"| B["Index / Staging Area<br/>下一次提交的快照"]
-    B -->|"git commit"| C["Repository / HEAD<br/>已经提交的历史"]
-    C -->|"restore / reset 等操作"| A
-```
-
-### 2.1 Working Tree
-
-Working Tree 就是当前目录中实际存在并正在编辑的文件。
-
-例如修改`src/kernel.c`，可以使用：
-
-```bash
-git status # 查看当前文件状态
-```
-
-如果文件已经被 Git 跟踪，会看到它处于 `modified` 状态。
-
----
-
-### 2.2 Index / Staging Area
-
-执行：
-
-```bash
-git add src/kernel.c
-```
-
-本质上是：
-
-> 将当前版本的 `src/kernel.c` 放入 Index，作为下一次 Commit 的候选内容。
-
-因此完全可能出现以下情况：
-
-1. 修改文件。
-2. 执行 `git add`。
-3. 再次修改同一个文件。
-
-此时 Index 和 Working Tree 中保存的是不同版本。
-
-查看 Working Tree 与 Index 的差异：
+`git status` 用于观察 working tree、index 和当前分支的整体状态。
 
 ```bash
 git diff
 ```
 
-查看 Index 与 HEAD 的差异：
-
-```bash
-git diff --cached
-```
-
-因此，`git add` 不应该简单理解成“告诉 Git 我要提交这个文件”。
-
-更准确地说，它是在构造：
-
-> 下一次 Commit 的快照。
-
----
-
-## 3. HEAD、Branch 和 Commit
-
-### 3.1 HEAD
-
-`HEAD` 表示当前检出的 Git 位置。
-
-正常情况下，HEAD 通常指向一个 Branch，而 Branch 再指向 Commit。
-
-```mermaid
-flowchart LR
-    A["Commit A"] --> B["Commit B"]
-    B --> C["Commit C"]
-    D["feature/foo"] --> C
-    E["HEAD"] --> D
-```
-
-执行新的 Commit 后：
-
-```mermaid
-flowchart LR
-    A["Commit A"] --> B["Commit B"]
-    B --> C["Commit C"]
-    C --> D["Commit D"]
-    E["feature/foo"] --> D
-    F["HEAD"] --> E
-```
-
-这里并没有修改 Commit C。
-
-Git 实际完成的是：
-
-1. 创建新的 Commit D。
-2. Commit D 的 Parent 指向 Commit C。
-3. `feature/foo` 移动到 Commit D。
-
----
-
-### 3.2 Branch 的本质
-
-Git Branch 本质上只是：
-
-> 一个指向 Commit 的可移动引用。
-
-因此创建 Branch 的成本非常低。
-
-```bash
-git switch -c experiment
-```
-
-并不会复制整个 Repository。
-
-只是创建了一个新的引用。
-
-这也是 Git 可以大量使用短生命周期 Feature Branch 的基础。
-
----
-
-## 4. Commit 的本质
-
-Git Repository 由一系列对象组成。
-
-常见对象包括：
-
-- blob：文件内容。
-- tree：目录及文件结构。
-- commit：一次提交。
-- tag：标签对象。
-
-一个 Commit 大致记录：
-
-- Tree。
-- Parent Commit。
-- Author。
-- Committer。
-- Commit Message。
-
-Commit 之间通过 Parent 组成提交历史。
-
-```mermaid
-flowchart LR
-    A["Commit A"] --> B["Commit B"]
-    B --> C["Commit C"]
-    C --> D["Commit D"]
-```
-
-Commit 创建之后可以认为是不可变对象。
-
-如果修改以下内容：
-
-- 文件内容。
-- Parent。
-- Commit Message。
-- Author / Committer 等元数据。
-
-都会产生新的 Commit。因此：
-
-```bash
-git commit --amend
-```
-
-并不是修改原来的 Commit，而是创建一个新的 Commit，然后移动当前 Branch。
-
----
-
-## 5. 为什么 Rebase 会改变 Commit Hash
-
-假设 Commit E 原来基于 Commit B：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> E["E"]
-```
-
-Rebase 后，E 的修改被重新应用到 Commit D：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    D --> E2["E'"]
-```
-
-新的 Commit E' 与原来的 Commit E 具有不同 Parent。
-
-由于 Parent 是 Commit 内容的一部分，因此：
-
-> 即使代码修改本身相同，Commit Hash 仍然会变化。
-
----
-
-## 6. 日常 Feature Branch 工作流
-
-首先更新本地主分支：
-
-```bash
-git switch main
-git pull --ff-only
-```
-
-或者显式执行：
-
-```bash
-git fetch origin
-git merge --ff-only origin/main
-```
-
-然后创建 Feature Branch，进行开发：
-
-```bash
-git switch -c feature/add-kv-cache
-```
-
-检查修改：
-
-```bash
-git status
-git diff
-```
-
-构造 Staging Area：
-
-```bash
-git add src/foo.cpp
-git diff --cached
-```
-
-提交：
-
-```bash
-git commit
-```
-
-推送远程：
-
-```bash
-git push -u origin feature/add-kv-cache
-```
-
-然后进入 PR / MR、Review 和 CI 流程。
-
----
-
-## 7. 为什么推荐 `git pull --ff-only`
-
-```bash
-git pull --ff-only
-```
-
-表示：
-
-> 如果当前分支无法通过 Fast-forward 更新，则直接失败。
-
-这样可以避免在自己没有意识到的情况下产生额外 Merge Commit。
-
-如果希望更明确地控制同步过程，可以使用：
-
-```bash
-git fetch origin
-```
-
-然后自己决定使用：
-
-```bash
-git merge origin/main
-```
-
-还是：
-
-```bash
-git rebase origin/main
-```
-
----
-
-## 8. `git fetch` 和 `git pull`
-
-### 8.1 `git fetch`
-
-```bash
-git fetch origin
-```
-
-主要作用是更新：
-
-- `origin/main`
-- `origin/feature/foo`
-- 其他 Remote-tracking Branch
-
-不会直接修改当前 Working Tree。
-
----
-
-### 8.2 `git pull`
-
-可以理解为两个步骤：
-
-1. Fetch。
-2. 将远程修改集成到当前 Branch。
-
-第二步可能采用 Merge，也可能根据 Git 配置采用 Rebase。查看相关配置：
-
-```bash
-git config --get pull.rebase
-```
-
-在需要精确控制提交历史时，显式执行 `fetch` 往往更容易理解。
-
----
-
-## 9. Remote-tracking Branch
-
-`origin/main` 并不是实时访问服务器上的 `main`。
-
-更准确地说，它是：
-
-> 本地记录的远程 Branch 状态。
-
-执行：
-
-```bash
-git fetch origin
-```
-
-后，它才会根据远程状态更新。
-
-因此：
-
-> 本地的 `origin/main` 并不一定代表服务器这一刻的最新状态。
-
----
-
-## 10. Commit 应该如何拆分
-
-一个好的 Commit 应尽量表达一个逻辑完整的修改。
-
-例如一次开发同时包含：
-
-- 修复 CUDA Kernel Bug。
-- 重构 Allocator。
-- 修改 README。
-- 格式化大量无关文件。
-- 升级依赖。
-
-全部放入一个 Commit，会增加 Review 和回滚难度。
-
-更合理的是根据逻辑拆分。
-
-例如：
+默认比较：
 
 ```text
-fix: handle alignment in cuda allocator
-refactor: extract allocation helper
-docs: document allocator constraints
+working tree <-> index
 ```
 
-是否采用 Conventional Commits 取决于团队规范。
+也就是：
 
-更加通用的原则是：
-
-- Commit 有明确目的。
-- Commit 尽量逻辑独立。
-- Commit 容易 Review。
-- Commit 尽量可以独立 Revert。
-- 不要将无关格式化和功能修改混在一起。
-
----
-
-## 11. `git add -p`
-
-一个文件中可能同时包含多个逻辑修改。
-
-不一定需要整个文件一起加入 Index。
-
-可以使用：
-
-```bash
-git add -p
-```
-
-Git 会按照 Hunk 逐块询问是否加入 Staging Area。
-
-这非常适合将一次比较杂乱的本地开发整理成多个逻辑清晰的 Commit。
-
----
-
-## 12. Merge
-
-假设主分支和 Feature Branch 已经产生分叉：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    B --> E["E"]
-    E --> F["F"]
-```
-
-在 Feature Branch 上执行：
-
-```bash
-git fetch origin
-git merge origin/main
-```
-
-可能产生新的 Merge Commit：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    B --> E["E"]
-    E --> F["F"]
-    D --> M["Merge Commit"]
-    F --> M
-```
-
-Merge 的特点：
-
-- 保留真实分叉历史。
-- 一般不会修改已有 Commit。
-- 必要时创建新的 Merge Commit。
-
-因此：
-
-> 对共享历史而言，Merge 通常比改写历史更加安全。
-
----
-
-## 13. Rebase
-
-假设：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    B --> E["E"]
-    E --> F["F"]
-```
-
-在 Feature Branch 上执行：
-
-```bash
-git fetch origin
-git rebase origin/main
-```
-
-会把 Feature Branch 上的 Commit 重新应用到新的 Base：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    D --> E2["E'"]
-    E2 --> F2["F'"]
-```
-
-注意：
-
-- `E'` 不是原来的 E。
-- `F'` 不是原来的 F。
-- Commit Hash 会改变。
-
-Rebase 本质上是在：
-
-> 将一系列 Commit 重新应用到新的 Base。
-
----
-
-## 14. Merge 和 Rebase 的使用场景
-
-| 场景 | 常见做法 |
-|---|---|
-| 自己本地的 Feature Branch | 可以 Rebase |
-| 自己独占的远程 Feature Branch | 可以根据团队规则 Rebase |
-| 多人共享 Feature Branch | 谨慎 Rebase |
-| `main` 等共享 Branch | 不随意 Rebase |
-| 已经被其他开发者依赖的 Commit | 不随意重写 |
-| 整理自己 PR 的 Commit | Interactive Rebase 很合适 |
-
-核心原则：
-
-> 不要随意 Rebase 已经被其他开发者依赖的公开历史。
-
----
-
-## 15. Interactive Rebase
-
-整理当前 Feature Branch：
-
-```bash
-git rebase -i origin/main
-```
-
-可能看到：
-
-```text
-pick a111111 implement allocator
-pick b222222 fix typo
-pick c333333 fix allocator bug
-pick d444444 another typo
-```
-
-可以修改为：
-
-```text
-pick a111111 implement allocator
-fixup b222222 fix typo
-fixup c333333 fix allocator bug
-fixup d444444 another typo
-```
-
-常见操作：
-
-| 操作 | 作用 |
-|---|---|
-| `pick` | 保留 Commit |
-| `reword` | 修改 Commit Message |
-| `edit` | 停下来修改 Commit |
-| `squash` | 合并 Commit，并编辑 Message |
-| `fixup` | 合并 Commit，并丢弃当前 Message |
-| `drop` | 删除 Commit |
-
-Interactive Rebase 非常适合整理尚未进入共享历史的 Feature Branch。
-
----
-
-## 16. Squash Merge
-
-Feature Branch 中可能包含多个开发过程 Commit：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    B --> D["D"]
-    D --> E["E"]
-    E --> F["F"]
-```
-
-如果平台最终采用 Squash Merge，可以将 Feature Branch 的最终修改合成一个新 Commit：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> S["Squashed Commit S"]
-```
-
-优点：
-
-- 主分支历史较简洁。
-- 一个 PR 可以对应一个 Commit。
-- 整体回滚一个 PR 比较方便。
-
-缺点：
-
-- Feature Branch 中原本的 Commit 粒度不会保留到主分支。
-
-具体采用 Merge Commit、Squash Merge 还是 Rebase Merge，应遵循 Repository Policy。
-
----
-
-## 17. Fast-forward
-
-假设：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    M["main"] --> B
-    F["feature"] --> D
-```
-
-由于 `main` 从 B 到 D 之间没有其他分叉修改，因此合并 Feature Branch 时，只需要让 `main` 指针移动到 D。
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    M["main"] --> D
-    F["feature"] --> D
-```
-
-这种合并称为 Fast-forward。
-
-没有创建新的 Merge Commit。
-
----
-
-## 18. `--no-ff`
-
-即使当前可以 Fast-forward，也可以使用：
-
-```bash
-git merge --no-ff feature
-```
-
-强制创建 Merge Commit。
-
-作用之一是：
-
-> 在历史中明确保留某次 Feature Branch 合并边界。
-
-是否采用这种策略取决于团队规范。
-
----
-
-## 19. Three-way Merge 和 Merge Base
-
-假设两个 Branch 从同一个 Commit 分叉：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    B --> E["E"]
-    E --> F["F"]
-```
-
-Merge 时 Git 不只是比较 D 和 F。
-
-还需要找到共同祖先 B，也就是 Merge Base。
-
-Git 根据：
-
-- Merge Base B。
-- Branch 一侧 D。
-- Branch 另一侧 F。
-
-执行 Three-way Merge。
-
-Merge Base 用于判断：
-
-> 哪些内容是在分叉之后分别被两侧修改的。
-
----
-
-## 20. Conflict
-
-假设 Base 中：
-
-```cpp
-int block_size = 128;
-```
-
-一个 Branch 改成：
-
-```cpp
-int block_size = 256;
-```
-
-另一个 Branch 改成：
-
-```cpp
-int block_size = 512;
-```
-
-Git 无法自动判断最终结果，可能产生：
-
-```text
-<<<<<<< HEAD
-int block_size = 256;
-=======
-int block_size = 512;
->>>>>>> feature
-```
-
-Conflict 并不代表 Git 出错。
-
-真正含义是：
-
-> Git 无法自动确定最终代码的正确语义，需要人工判断。
-
----
-
-## 21. Merge Conflict 处理
-
-首先检查：
-
-```bash
-git status
-```
-
-修改冲突文件。
-
-解决完成后：
-
-```bash
-git add <file>
-```
-
-然后根据状态继续：
-
-```bash
-git merge --continue
-```
-
-某些情况下也可以通过 Commit 完成 Merge。
-
-如果希望完全放弃：
-
-```bash
-git merge --abort
-```
-
----
-
-## 22. Rebase Conflict
-
-执行：
-
-```bash
-git rebase origin/main
-```
-
-发生冲突后：
-
-```bash
-git status
-```
-
-解决文件：
-
-```bash
-git add <file>
-git rebase --continue
-```
-
-放弃整个 Rebase：
-
-```bash
-git rebase --abort
-```
-
-Rebase 是逐个重新应用 Commit。
-
-因此一次 Rebase 中可能连续遇到多轮 Conflict。
-
----
-
-## 23. Conflict Resolution 是语义问题
-
-不要把 Conflict Resolution 简单理解成：
-
-- Accept Current。
-- Accept Incoming。
-
-例如一个 Branch 修改 Tensor Layout，另一个 Branch 修改 CUDA Kernel Indexing。
-
-即使文本能够成功合并，也可能产生语义错误。
-
-因此解决冲突后，应根据项目情况重新执行：
-
-- Unit Test。
-- Integration Test。
-- Build。
-- Static Analysis。
-- Relevant Benchmark。
-
----
-
-## 24. `git reset`
-
-`reset` 的核心作用之一是移动当前 Branch / HEAD。
-
-假设：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    H["HEAD / Current Branch"] --> C
-```
-
-执行将当前 Branch Reset 到 B 后：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    H["HEAD / Current Branch"] --> B
-```
-
-Commit C 并不一定立即消失。
-
-只是当前 Branch 不再指向它。
-
----
-
-## 25. `reset --soft`
-
-```bash
-git reset --soft HEAD~1
-```
-
-效果：
-
-- HEAD 后退。
-- Index 保持不变。
-- Working Tree 保持不变。
-
-适合：
-
-> 撤销本地 Commit，但仍然保持修改处于 Staged 状态。
-
----
-
-## 26. `reset --mixed`
-
-默认的：
-
-```bash
-git reset HEAD~1
-```
-
-相当于：
-
-```bash
-git reset --mixed HEAD~1
-```
-
-效果：
-
-- HEAD 后退。
-- Index 回退。
-- Working Tree 保留。
-
-Commit 被撤销后，修改重新成为 Unstaged Changes。
-
----
-
-## 27. `reset --hard`
-
-```bash
-git reset --hard HEAD~1
-```
-
-会同时影响：
-
-- HEAD。
-- Index。
-- Working Tree。
-
-因此未提交的 Tracked 文件修改可能直接被覆盖。
-
-使用之前最好先确认：
-
-```bash
-git status
-```
-
-不要养成仓库状态不对就直接 `reset --hard`的习惯。
-
----
-
-## 28. `git revert`
-
-假设提交历史：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C<br/>错误修改"]
-```
-
-执行：
-
-```bash
-git revert C
-```
-
-Git 不会删除 C。
-
-而是创建新的 Commit D：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C<br/>错误修改"]
-    C --> D["D<br/>反向抵消 C"]
-```
-
-因此：
-
-> 已经进入共享分支的错误修改通常优先通过 Revert 撤销，而不是修改已有历史。
-
----
-
-## 29. Reset 和 Revert 的使用场景
-
-| 场景 | 常见做法 |
-|---|---|
-| 本地 Commit，尚未共享 | 可以考虑 `reset` |
-| 本地历史需要重新组织 | `reset` / `rebase` |
-| 已进入公共 Branch | 优先 `revert` |
-| 主分支线上出现错误修改 | Revert 对应 Commit / PR |
-| 需要保留完整审计历史 | `revert` |
-
-可以概括为：
-
-> 本地私有历史可以整理，共享历史优先通过新增 Commit 修复。
-
----
-
-## 30. `git restore`
-
-放弃 Working Tree 中某个 Tracked 文件的修改：
-
-```bash
-git restore src/foo.cpp
-```
-
-取消 Staged：
-
-```bash
-git restore --staged src/foo.cpp
-```
-
-两者区别很重要。
-
-`git restore --staged` 只是修改 Index。
-
-Working Tree 中的修改仍然存在。
+> 当前还有哪些修改没有进入 staging area？
 
 而：
 
 ```bash
-git restore src/foo.cpp
+git diff --staged
 ```
 
-可能直接覆盖尚未 Commit 的文件修改。
-
----
-
-## 31. `git commit --amend`
-
-修改最近一次 Commit：
-
-```bash
-git commit --amend
-```
-
-典型用途：
-
-- Commit Message 写错。
-- 漏掉一个文件。
-- 将一个很小的修复加入上一 Commit。
-
-例如：
-
-```bash
-git add missing_file.cpp
-git commit --amend
-```
-
-需要注意：
-
-> Amend 会创建新的 Commit，因此 Commit Hash 会改变。
-
----
-
-## 32. Force Push
-
-普通：
-
-```bash
-git push
-```
-
-会阻止很多 Non-fast-forward 更新。而：
-
-```bash
-git push --force
-```
-
-允许直接修改远程 Branch 引用。
-
-风险是：
-
-> 可能覆盖其他开发者刚刚推送的 Commit。
-
-如果确实需要改写自己的远程 Feature Branch，更常使用：
-
-```bash
-git push --force-with-lease
-```
-
-它会检查远程 Branch 是否仍然处于自己预期的位置。
-
-如果远程 Branch 已经发生变化，Push 通常会失败。
-
-但 `--force-with-lease` 仍然属于：
-
-> 改写远程历史。
-
-因此不能把它理解成无条件安全。
-
----
-
-## 33. Rebase 后为什么经常需要 Force Push
-
-假设远程 Feature Branch：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> E["E"]
-    E --> F["F"]
-```
-
-Rebase 后，本地变成：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    D --> E2["E'"]
-    E2 --> F2["F'"]
-```
-
-由于原来的 E、F 和新的 E'、F' 是不同 Commit，因此无法通过普通 Fast-forward Push 替换远程历史。
-
-如果该 Branch 明确允许重写，可以使用：
-
-```bash
-git push --force-with-lease
-```
-
----
-
-## 34. Cherry-pick
-
-执行：
-
-```bash
-git cherry-pick <commit>
-```
-
-作用是：
-
-> 将某个已有 Commit 引入的修改应用到当前 Branch，并创建一个新的 Commit。
-
-例如：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C<br/>Bugfix"]
-    B --> R["release branch"]
-```
-
-在 Release Branch 上 Cherry-pick C 后：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C<br/>Bugfix on main"]
-    B --> C2["C'<br/>Cherry-picked Bugfix"]
-```
-
-C' 与 C 的修改可能相同，但 Parent 不同，因此 Commit Hash 不同。
-
----
-
-## 35. Cherry-pick 的常见用途
-
-典型场景包括：
-
-- Release Branch Backport。
-- Hotfix。
-- 将一个独立 Bugfix 移植到另一个 Branch。
-
-不适合将 Cherry-pick 作为长期 Branch 同步机制。
-
-如果两个长期 Branch 不断互相 Cherry-pick，提交历史会逐渐变得难以理解。
-
----
-
-## 36. Revert Merge Commit
-
-Merge Commit 有多个 Parent。
-
-例如：
-
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    B --> E["E"]
-    E --> F["F"]
-    D --> M["Merge Commit M"]
-    F --> M
-```
-
-如果需要 Revert M，可能使用：
-
-```bash
-git revert -m 1 <merge_commit>
-```
-
-`-m 1` 用于告诉 Git：
-
-> 哪一个 Parent 应当被视为 Mainline。
-
-不要机械记忆数字。
-
-应该根据具体 Parent 关系判断。
-
----
-
-## 37. `git reflog`
-
-Reflog 是本地误操作恢复中非常重要的工具。
-
-例如错误执行：
-
-```bash
-git reset --hard HEAD~3
-```
-
-可以查看：
-
-```bash
-git reflog
-```
-
-可能看到：
+比较：
 
 ```text
-82ad123 HEAD@{0}: reset: moving to HEAD~3
-91bc456 HEAD@{1}: commit: add cuda graph support
-ae21890 HEAD@{2}: commit: refactor scheduler
+index <-> HEAD
 ```
 
-如果确认 `91bc456` 是需要恢复的位置，可以先创建恢复 Branch：
+也就是：
+
+> 如果现在执行 `git commit`，将提交哪些变化？
+
+因此恢复 Git 使用后，一个值得重新形成的习惯是：
 
 ```bash
-git switch -c recovery 91bc456
+git status
+git diff
+
+git add <file>
+
+git diff --staged
+git commit
 ```
 
-这种做法通常比直接再次 Hard Reset 更保守。
+不要在没有确认 staged 内容的情况下机械执行 `git add . && git commit`。
 
----
+## HEAD、branch 和 commit 的关系
 
-## 38. Reflog 为什么能够恢复很多误操作
+Git branch 可以理解为一个指向 commit 的可移动引用。
 
-很多 Git 操作实际上只是移动引用。
-
-例如 Reset 前：
+假设当前历史为：
 
 ```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    H["Branch"] --> D
+gitGraph
+    commit id: "A"
+    commit id: "B"
+    commit id: "C"
 ```
 
-Reset 后：
+如果 `main` 指向 `C`，并且当前正在 `main` 上工作，可以理解为：
 
-```mermaid
-flowchart LR
-    A["A"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    H["Branch"] --> B
+```text
+HEAD -> main -> C
 ```
 
-D 并不会立即被物理删除。
-
-Reflog 又记录了引用曾经的位置，因此可以找到原 Commit。
-
-需要注意：
-
-> Reflog 是本地恢复机制，不能代替远程备份和正常的协作流程。
-
----
-
-## 39. `git stash`
-
-临时保存当前修改：
+再次执行：
 
 ```bash
-git stash push -m "wip scheduler"
+git commit
 ```
 
-查看：
+产生新 commit `D` 后：
 
-```bash
-git stash list
+```text
+HEAD -> main -> D
 ```
 
-恢复：
+原来的 `C` 没有移动。
+
+移动的是 `main` 这个 branch reference。
+
+因此理解很多 Git 操作时，可以先问：
+
+> 这个操作是在修改文件，还是在移动某个 reference？
+
+例如：
 
 ```bash
-git stash pop
+git reset <commit>
 ```
 
-Stash 适合：
+会改变当前 branch 指向的位置，并且根据 reset mode 决定是否继续修改 index 和 working tree。
 
-> 临时切换上下文。
-
-不适合长期保存大量开发工作。
-
-如果工作需要持续较长时间，创建临时 Branch 并 Commit 往往更容易管理。
-
----
-
-## 40. `git worktree`
-
-如果需要同时维护多个工作目录，可以使用：
+而：
 
 ```bash
-git worktree add ../repo-hotfix main
+git switch feature
 ```
 
-此时可以同时拥有：
+会让 `HEAD` 切换到另一个 branch，同时更新 index 和 working tree，使其匹配目标 branch。
 
-- 原目录处理 Feature。
-- 新目录处理 Hotfix。
+## 接手仓库时先观察，不要直接修改历史
 
-在开发中尤其有用，例如：
+重新进入一个很久没有操作的仓库，或者遇到 Git 问题时，第一步不应该是直接执行：
 
-- 一个 Worktree 编译新实现。
-- 一个 Worktree 保持 Baseline。
-- 一个 Worktree 跑 Benchmark。
-- 一个 Worktree 处理紧急修复。
+```text
+pull
+reset
+rebase
+force push
+```
 
-这样可以避免频繁 Stash 和切换 Branch。
+先观察仓库当前状态。
 
----
-
-## 41. 常用历史查看命令
-
-查看历史：
+一组常用的诊断命令是：
 
 ```bash
+git status
+git branch -vv
+git remote -v
 git log --oneline --graph --decorate --all
 ```
 
-查看某个文件的历史：
+其中：
 
 ```bash
-git log -- path/to/file
+git status
 ```
 
-查看某次 Commit：
+检查 working tree、index 和当前 branch。
 
 ```bash
-git show <commit>
+git branch -vv
 ```
 
-比较两个 Commit：
-
-```bash
-git diff <commit1> <commit2>
-```
-
-比较当前 Branch 相对主分支的整体修改：
-
-```bash
-git diff origin/main...HEAD
-```
-
----
-
-## 42. `git blame`
-
-查看文件中每一行最近对应的 Commit：
-
-```bash
-git blame src/foo.cpp
-```
-
-它的主要工程用途不是寻找责任人。
-
-更有价值的用途是：
-
-> 找到某段代码对应的历史上下文。
-
-推荐排查流程：
-
-```mermaid
-flowchart TD
-    A["git blame"] --> B["定位相关 Commit"]
-    B --> C["git show"]
-    C --> D["查看 Commit 修改背景"]
-    D --> E["结合 PR / Issue / Design Context"]
-```
-
----
-
-## 43. `git bisect`
-
-Bisect 可以通过二分方式定位引入问题的 Commit。
-
-假设：
-
-```mermaid
-flowchart LR
-    A["A<br/>Good"] --> B["B"]
-    B --> C["C"]
-    C --> D["D"]
-    D --> E["E"]
-    E --> F["F"]
-    F --> G["G<br/>Bad"]
-```
-
-开始：
-
-```bash
-git bisect start
-git bisect bad
-git bisect good <good-commit>
-```
-
-然后根据当前 Commit 的测试结果不断执行：
-
-```bash
-git bisect good
-```
-
-或者：
-
-```bash
-git bisect bad
-```
-
-如果测试能够自动化，可以使用：
-
-```bash
-git bisect run ./test.sh
-```
-
-非常适合定位：
-
-- Kernel Correctness Regression。
-- Compilation Failure。
-- Latency Regression。
-- Memory Regression。
-- Runtime Crash。
-
----
-
-## 44. Detached HEAD
-
-正常情况下：
-
-```mermaid
-flowchart LR
-    C["Commit C"]
-    B["Branch"] --> C
-    H["HEAD"] --> B
-```
-
-Detached HEAD 状态下：
-
-```mermaid
-flowchart LR
-    C["Commit C"]
-    H["HEAD"] --> C
-```
-
-此时仍然可以创建 Commit，但新 Commit 不一定有 Branch 长期引用。
-
-如果需要保留实验结果，可以创建 Branch：
-
-```bash
-git switch -c experiment
-```
-
----
-
-## 45. Tag
-
-创建 Annotated Tag：
-
-```bash
-git tag -a v1.2.0 -m "release v1.2.0"
-```
-
-推送：
-
-```bash
-git push origin v1.2.0
-```
-
-Tag 常用于：
-
-- Release Version。
-- Build Version。
-- Container Image Version。
-- Deployment Provenance。
-
-具体发布体系是否基于 Tag，由项目的 CI/CD 设计决定。
-
----
-
-## 46. Protected Main
-
-生产 Repository 通常不会让所有开发者自由修改主分支。
-
-常见限制包括：
-
-- 禁止直接 Push 到 `main`。
-- 必须通过 PR / MR。
-- 必须完成 Code Review。
-- CI 必须通过。
-- 某些目录需要 Code Owner 审批。
-- 禁止 Force Push。
-- 禁止删除主分支。
-- 合并前必须满足 Repository Rules。
-
-这些规则的目的不是限制 Git 功能，而是控制：
-
-> 哪些 Git 历史修改能够进入共享主干。
-
----
-
-## 47. PR / MR 工作流
-
-典型流程：
-
-```mermaid
-flowchart TD
-    A["Developer Push Feature Branch"] --> B["Create PR / MR"]
-    B --> C["CI Runs"]
-    B --> D["Code Review"]
-    D --> E{"需要修改？"}
-    E -->|"Yes"| F["Update Feature Branch"]
-    F --> C
-    F --> D
-    E -->|"No"| G{"Required Checks Passed?"}
-    C --> G
-    G -->|"No"| F
-    G -->|"Yes"| H["Merge Queue / Merge"]
-    H --> I["main"]
-```
-
-生产代码管理通常由多部分组成：
-
-- Git
-- PR / MR
-- Code Review
-- CI
-- Branch Protection
-- CODEOWNERS
-- Merge Policy
-- Release System
-
-Git 是其中最底层的版本控制机制。
-
----
-
-## 48. Merge Queue / Merge Train
-
-两个 PR 单独基于当前 `main` 测试通过，并不能保证它们组合后仍然通过。
-
-```mermaid
-flowchart TD
-    A["main + PR A"] --> A1["CI Pass"]
-    B["main + PR B"] --> B1["CI Pass"]
-    A1 --> C["main + A + B"]
-    B1 --> C
-    C --> D{"仍然通过？"}
-```
-
-因此高并发仓库可能引入 Merge Queue / Merge Train。
-
-```mermaid
-flowchart LR
-    A["PR A"] --> Q["Merge Queue"]
-    B["PR B"] --> Q
-    C["PR C"] --> Q
-    Q --> T1["Validate main + A"]
-    T1 --> T2["Validate main + A + B"]
-    T2 --> T3["Validate main + A + B + C"]
-    T3 --> M["main"]
-```
-
-目标是：
-
-> 在 Commit 真正进入主干之前验证排队后的组合结果。
-
----
-
-## 49. Feature Branch 应尽量短生命周期
-
-Feature Branch 存活时间越长：
-
-- 与 Main 的差异越大。
-- Conflict 越多。
-- Integration Risk 越高。
-- Review 越困难。
-
-因此很多生产环境倾向使用：
-
-- Protected Main。
-- Short-lived Feature Branch。
-- PR / MR。
-- Continuous Integration。
-
-Release Branch、Hotfix Branch 是否长期存在，则根据项目发布模型决定。
-
----
-
-## 50. 生产 Hotfix
-
-如果错误 Commit 已经进入生产环境，首要目标通常是恢复服务。
-
-典型过程：
-
-```mermaid
-flowchart LR
-    A["Bad Commit Reaches Production"] --> B["Revert"]
-    B --> C["Restore Stable State"]
-    C --> D["Root Cause Analysis"]
-    D --> E["Implement Proper Fix"]
-    E --> F["Add Regression Test"]
-    F --> G["Deploy Again"]
-```
-
-因此：
-
-> Revert 只是恢复稳定状态，不一定是最终 Bugfix。
-
----
-
-## 51. `.gitignore`
-
-如果文件从未被 Track，例如：
-
-`build/output.bin`
-
-可以通过 `.gitignore`：
-
-```gitignore
-build/
-```
-
-让 Git 默认忽略。
-
-但是：
-
-> `.gitignore` 不会让已经被 Track 的文件自动停止跟踪。
-
-如果文件已经进入 Repository，需要：
-
-```bash
-git rm --cached build/output.bin
-```
-
-然后 Commit。
-
----
-
-## 52. 大文件管理
-
-项目中特别要注意：
-
-- Model Checkpoint。
-- Dataset。
-- Benchmark Output。
-- 大型 Binary。
-- Core Dump。
-- Profiling Trace。
-
-不适合直接作为普通 Git 对象长期 Commit。
-
-原因之一是：
-
-> 文件从当前版本删除，并不意味着其历史 Blob 自动消失。
-
-更适合根据基础设施使用：
-
-- Object Storage。
-- Artifact Repository。
-- Dataset Management System。
-- Model Registry。
-- Git LFS。
-
----
-
-## 53. Secret 不应进入 Git
-
-不要 Commit：
-
-- API Key。
-- Cloud Credential。
-- SSH Private Key。
-- Access Token。
-- Production Password。
-
-如果 Secret 已经 Push 到远程 Repository，不应该只考虑如何删除 Git Commit。
-
-正确处理顺序通常是：
-
-```mermaid
-flowchart LR
-    A["Secret Pushed"] --> B["Revoke / Rotate Credential"]
-    B --> C["Assess Exposure"]
-    C --> D["Clean Repository History if Required"]
-    D --> E["Improve Secret Scanning / Workflow"]
-```
-
-因为 Secret 可能已经进入：
-
-- Remote Repository。
-- Developer Clone。
-- CI Log。
-- Cache。
-- Mirror。
-- Audit System。
-
----
-
-## 54. Submodule
-
-初始化：
-
-```bash
-git submodule update --init --recursive
-```
-
-Submodule 的核心模型是：
-
-> 主 Repository 记录另一个 Repository 的特定 Commit。
-
-常见问题包括：
-
-- Clone 后忘记初始化。
-- Submodule Pointer 变化。
-- Nested Submodule。
-- CI 没有递归 Checkout。
-
-在大型 C++ / CUDA 项目中可能遇到，但日常只需要先理解基本机制。
-
----
-
-## 55. Monorepo
-
-大型 Monorepo 可能面临：
-
-- Repository 体积很大。
-- Clone / Fetch 成本高。
-- CI 范围巨大。
-- 大量团队同时修改 Main。
-- Merge 并发很高。
-
-可能结合：
-
-- Sparse Checkout。
-- Partial Clone。
-- Path-based CI。
-- CODEOWNERS。
-- Merge Queue。
-- Repository Rules。
-
-这些机制主要解决大规模协作和仓库性能问题。
-
----
-
-## 56. `git clean`
-
-预览将被删除的 Untracked 文件：
-
-```bash
-git clean -n
-```
-
-真正删除：
-
-```bash
-git clean -f
-```
-
-包含目录：
-
-```bash
-git clean -fd
-```
-
-使用时需要特别谨慎，因为：
-
-> Untracked 文件通常没有 Git 历史可以恢复。
-
-因此应该优先执行：
-
-```bash
-git clean -n
-```
-
-确认删除范围。
-
----
-
-## 57. Review 过程中如何处理临时 Commit
-
-Review 阶段可能产生：
-
-```text
-implement scheduler
-fix typo
-address review
-fix test
-rename helper
-```
-
-如果团队希望合入前整理历史，可以使用：
-
-```bash
-git rebase -i origin/main
-```
-
-最终整理成逻辑更明确的 Commit。
-
-是否需要 Squash，应遵循 Repository Policy，而不是机械要求所有 PR 都压成一个 Commit。
-
----
-
-## 58. Upstream 开源项目工作流
-
-参与 PyTorch、vLLM、LLVM 或其他开源项目时，经常会使用 Fork + Upstream 模式。
-
-```mermaid
-flowchart TD
-    A["Upstream Repository"] --> B["Fork"]
-    B --> C["Local Repository"]
-    C --> D["Feature Branch"]
-    A -->|"fetch upstream"| C
-    D -->|"rebase upstream/main"| E["Updated Feature Branch"]
-    E --> F["Push to Fork"]
-    F --> G["Create Pull Request to Upstream"]
-```
-
-常见 Remote：
+重点观察：
+
+- 当前在哪个本地 branch
+- branch 是否配置 upstream
+- upstream 是哪个 remote-tracking branch
+- branch 是否 ahead / behind
 
 ```bash
 git remote -v
 ```
 
-通常：
-
-- `origin` 指向自己的 Fork。
-- `upstream` 指向原始项目。
-
-同步：
+确认当前配置了哪些 remote。
 
 ```bash
-git fetch upstream
-git rebase upstream/main
+git log --oneline --graph --decorate --all
 ```
 
----
+用于观察：
 
-## 59. Backport
+- commit history
+- `HEAD`
+- 本地 branch
+- remote-tracking branch
+- branch 从哪里产生分叉
+- 是否存在 merge commit
 
-项目可能同时维护：
+出现问题时，可以先按照下面的顺序判断：
 
-- `main`
-- `release/1.0`
-- `release/1.1`
+```text
+status
+→ HEAD / branch
+→ commit history
+→ remote
+→ fetch
+→ 比较本地与 remote-tracking branch
+→ 决定下一步操作
+```
 
-例如 Bugfix 首先进入 `main`：
+核心原则是：
+
+<mark>先弄清当前状态，再修改状态。</mark>
+
+## `switch`、`restore` 与以前常用的 `checkout`
+
+以前使用 Git 时可能已经习惯：
+
+```bash
+git checkout main
+git checkout -b feature/login
+git checkout -- file.cpp
+```
+
+这些操作现在也可以分别写成：
+
+```bash
+git switch main
+git switch -c feature/login
+git restore file.cpp
+```
+
+可以先记住职责上的区别：
+
+| 目的 | 命令 |
+| --- | --- |
+| 切换已有 branch | `git switch <branch>` |
+| 创建并切换 branch | `git switch -c <branch>` |
+| 切换回上一个 branch | `git switch -` |
+| 临时查看某个 commit | `git switch --detach <commit>` |
+| 恢复 working tree 中的文件 | `git restore <file>` |
+| 取消 staging | `git restore --staged <file>` |
+
+`git checkout` 并没有失效。
+
+`switch` 和 `restore` 的主要价值是把“切换 branch”和“恢复文件”两个不同职责拆开，使操作对象更清楚。
+
+## 日常 feature branch 开发流程
+
+假设团队以 `main` 为主分支，一个典型 feature 开发过程可以先更新本地 `main`：
+
+```bash
+git switch main
+git fetch origin
+```
+
+此时 `fetch` 会更新类似：
+
+```text
+origin/main
+```
+
+这样的 remote-tracking branch，但不会自动修改本地 `main`。
+
+先检查：
+
+```bash
+git status
+git log --oneline --graph --decorate --all
+```
+
+如果确认：
+
+```text
+main
+```
+
+只是单纯落后于：
+
+```text
+origin/main
+```
+
+可以执行：
+
+```bash
+git merge --ff-only origin/main
+```
+
+`--ff-only` 表示只有能够 fast-forward 时才更新，否则停止，让你自己处理已经分叉的历史。
+
+然后创建 feature branch：
+
+```bash
+git switch -c feature/login
+```
+
+开发过程中：
+
+```bash
+git status
+git diff
+```
+
+确认需要提交的修改后：
+
+```bash
+git add src/login.cpp
+```
+
+再次确认 staged 内容：
+
+```bash
+git diff --staged
+```
+
+然后提交：
+
+```bash
+git commit -m "Add login validation"
+```
+
+如果一个文件中同时存在多个逻辑无关的修改，可以使用：
+
+```bash
+git add -p
+```
+
+按 hunk 选择进入 index 的修改，从而避免把无关变化塞进同一个 commit。
+
+第一次推送 branch 时：
+
+```bash
+git push -u origin feature/login
+```
+
+`-u` 是 `--set-upstream` 的缩写，用于建立本地 branch 与 upstream branch 的关系。
+
+## local branch、remote-tracking branch 和 remote branch
+
+这一组概念很容易混淆。
+
+假设存在：
+
+```text
+main
+origin/main
+GitHub 上的 main
+```
+
+它们不是同一个东西。
+
+`main` 是：
+
+> 本地 branch。
+
+`origin/main` 是：
+
+> 本地保存的 remote-tracking branch。
+
+GitHub 上真正的 `main` 则存在于 remote repository。
+
+`origin/main` 表示的是：
+
+> Git 最近一次与 `origin` 通信以后，本地记录的远程 `main` 状态。
+
+因此：
+
+```bash
+git log origin/main
+```
+
+并不能保证看到服务器当前最新的 `main`。
+
+先执行：
+
+```bash
+git fetch origin
+```
+
+Git 才会根据 remote 状态更新对应的 remote-tracking branches。
+
+这也是为什么诊断远程历史问题时，通常应该先 `fetch`。
+
+## `fetch`、`pull` 和 `push`
+
+### `git fetch`
+
+```bash
+git fetch origin
+```
+
+会从 remote 获取本地缺少的对象和引用信息，并更新配置对应的 remote-tracking branches，例如：
+
+```text
+origin/main
+origin/feature/login
+```
+
+它不会自动把这些变化整合进当前 branch。
+
+因此 `fetch` 很适合用来先同步远程信息，再观察 history：
+
+```bash
+git fetch origin
+git log --oneline --graph --decorate --all
+```
+
+然后再决定需要 merge 还是 rebase。
+
+### `git pull`
+
+`git pull` 可以理解为两个阶段：
+
+```text
+fetch
++
+将获取到的历史整合进当前 branch
+```
+
+整合方式可能是 merge、rebase 或仅允许 fast-forward，具体取决于参数和配置。
+
+因此在重新恢复 Git 使用期间，如果对当前 history 没有把握，可以先显式拆开：
+
+```bash
+git fetch origin
+```
+
+观察以后再执行：
+
+```bash
+git merge origin/main
+```
+
+或者：
+
+```bash
+git rebase origin/main
+```
+
+这样更容易理解每一步到底改变了什么。
+
+### `git push`
+
+例如：
+
+```bash
+git push origin feature/login
+```
+
+会尝试使用本地 `feature/login` 更新 remote repository 中对应的 branch，并传输远程缺少的对象。
+
+如果 remote branch 已经包含本地不知道的新 commit，普通 push 通常会拒绝进行非 fast-forward 更新。
+
+此时第一反应不应该是 force push，而应该：
+
+```bash
+git fetch origin
+git log --oneline --graph --decorate --all
+```
+
+先确认双方历史为什么发生了分叉。
+
+## Fast-forward 是什么
+
+假设：
+
+```mermaid
+gitGraph
+    commit id: "A"
+    commit id: "B"
+    commit id: "C"
+```
+
+如果本地 `main` 指向 `B`，而 `origin/main` 指向 `C`，并且本地在 `B` 后没有额外 commit：
+
+```text
+A -- B -- C
+     ^    ^
+    main  origin/main
+```
+
+那么把 `main` 更新到 `C` 时不需要创建新的 commit，只需要让 `main` 向前移动：
+
+```text
+A -- B -- C
+          ^
+       main
+       origin/main
+```
+
+这就是 fast-forward。
+
+因此：
+
+```bash
+git merge --ff-only origin/main
+```
+
+可以理解为：
+
+> 如果当前 branch 可以单纯向前移动，就更新；如果已经与目标 branch 分叉，就停止。
+
+## 分支产生分叉以后真正的问题是什么
+
+假设：
+
+```mermaid
+gitGraph
+    commit id: "A"
+    commit id: "B"
+    branch feature
+    checkout feature
+    commit id: "C"
+    commit id: "D"
+    checkout main
+    commit id: "E"
+```
+
+此时：
+
+- `main` 包含 `E`
+- `feature` 包含 `C`、`D`
+- 两条 branch 从 `B` 开始产生分叉
+
+接下来真正的问题不是“使用哪个命令”，而是：
+
+> 应该怎样整合两条历史？
+
+日常开发中最重要的两种方式是：
+
+- merge
+- rebase
+
+## merge 保留已有历史关系
+
+假设当前在 `main`：
+
+```bash
+git switch main
+git merge feature
+```
+
+如果不能 fast-forward，Git 会创建一个具有两个 parent 的 merge commit：
+
+```mermaid
+gitGraph
+    commit id: "A"
+    commit id: "B"
+    branch feature
+    checkout feature
+    commit id: "C"
+    commit id: "D"
+    checkout main
+    commit id: "E"
+    merge feature id: "M"
+```
+
+原来的：
+
+```text
+C
+D
+E
+```
+
+仍然保持原有 ancestry。
+
+因此 merge 可以理解为：
+
+> 保留两条已经发生的开发历史，并创建一个新的 commit 把它们连接起来。
+
+## rebase 会重新应用 commit
+
+假设历史为：
+
+```text
+      C -- D  feature
+     /
+A -- B -- E  main
+```
+
+当前在 `feature`：
+
+```bash
+git switch feature
+git rebase main
+```
+
+Git 会把 `feature` 上相对于 `main` 需要保留的提交重新应用到新的 base 上。
+
+结果可以理解为：
+
+```mermaid
+gitGraph
+    commit id: "A"
+    commit id: "B"
+    commit id: "E"
+    branch feature
+    checkout feature
+    commit id: "C'"
+    commit id: "D'"
+```
+
+新的 `C'`、`D'` 与原来的 `C`、`D` 不是同一个 commit。
+
+即使文件修改相同，它们的 parent 已经改变，因此 commit identity 也会改变。
+
+所以：
+
+**rebase 会重写被重新应用的那段 commit history。**
+
+## merge 与 rebase 应该怎样选择
+
+不要只记：
+
+```text
+merge = 历史不直
+rebase = 历史漂亮
+```
+
+真正重要的问题是：
+
+> 这段 commit history 是否适合被重新创建？
+
+### 自己尚未共享的 feature history
+
+例如只有自己使用：
+
+```text
+feature/my-work
+```
+
+这种 history 可以根据团队 workflow 使用 rebase 更新 base：
+
+```bash
+git fetch origin
+git rebase origin/main
+```
+
+### 已经被其他人依赖的共享 history
+
+如果一些 commit 已经 push，并且其他开发者可能基于它们继续工作，那么 rebase 会让这些 commits 被新的 commits 替代。
+
+因此核心原则是：
+
+<mark>不要在没有团队约定的情况下随意重写别人已经依赖的共享历史。</mark>
+
+具体使用 merge、rebase，或者 GitHub 的 squash merge / rebase merge，应以项目 workflow 为准。
+
+## merge conflict 表示 Git 无法安全决定最终结果
+
+Git 可以自动合并很多变化。
+
+如果两个 branch：
+
+- 修改不同文件
+- 修改同一文件的不同区域
+
+Git 往往可以自动完成 merge。
+
+但如果出现竞争性修改，例如双方修改同一段内容，Git 可能无法确定最终应该保留什么。
+
+这时就会产生 merge conflict。
+
+Conflict 并不是仓库“坏掉了”，而是 Git 暂停当前操作，等待你确定最终内容。
+
+第一步应该执行：
+
+```bash
+git status
+```
+
+确认：
+
+- 哪些文件存在 conflict
+- 当前正在进行 merge、rebase 还是其他操作
+- 下一步 Git 期望执行什么
+
+## 处理 merge conflict
+
+假设：
+
+```bash
+git merge feature
+```
+
+发生 conflict。
+
+先：
+
+```bash
+git status
+```
+
+冲突文件中可能出现：
+
+```text
+<<<<<<< HEAD
+current branch content
+=======
+other branch content
+>>>>>>> feature
+```
+
+这些 marker 表示 Git 无法自动决定最终内容。
+
+处理 conflict 的核心不是“删除 marker”，而是：
+
+> 根据程序应该实现的最终行为，编辑出正确的最终文件。
+
+修改完成以后：
+
+```bash
+git add path/to/file
+```
+
+此时 `git add` 表示：
+
+> 把解决后的最终内容写入 index，并把该路径标记为已经解决。
+
+所有冲突解决后：
+
+```bash
+git merge --continue
+```
+
+也可以在相应情况下通过 `git commit` 完成 merge。
+
+如果决定完全放弃这次 merge：
+
+```bash
+git merge --abort
+```
+
+Git 官方文档同时提醒：如果开始 merge 前 working tree 中存在复杂的未提交修改，`git merge --abort` 不一定能够完美恢复这些修改。因此执行复杂 merge 前，最好先让当前工作处于可恢复状态。
+
+## 处理 rebase conflict
+
+执行：
+
+```bash
+git rebase main
+```
+
+时，如果某个 commit 无法重新应用，rebase 会暂停。
+
+先检查：
+
+```bash
+git status
+```
+
+解决 conflict 后：
+
+```bash
+git add <file>
+git rebase --continue
+```
+
+如果后续 commit 再次发生 conflict，则重复：
+
+```text
+解决文件
+→ git add
+→ git rebase --continue
+```
+
+如果决定取消整个 rebase：
+
+```bash
+git rebase --abort
+```
+
+会尝试把 branch 恢复到 rebase 开始前的位置。
+
+因此遇到冲突时最重要的习惯是：
+
+<mark>不要在不知道当前 Git 正处于什么操作的情况下继续执行新的 history-changing command。</mark>
+
+先看：
+
+```bash
+git status
+```
+
+## 撤销操作前先判断要修改哪一层
+
+遇到错误以后，不要只问：
+
+> Git 怎么撤销？
+
+应该先判断错误发生在哪一层：
+
+```text
+working tree
+index
+commit history
+shared history
+```
+
+不同情况需要不同操作。
+
+## 丢弃未 staged 的 tracked 修改
+
+如果文件已经修改，但还没有 staged：
+
+```bash
+git diff -- file.cpp
+```
+
+确认确实不需要这些修改以后：
+
+```bash
+git restore file.cpp
+```
+
+默认情况下，这会使用 index 中的版本恢复 working tree。
+
+因此 working tree 中对应的未保存修改会丢失。
+
+## 取消 staging，但保留 working tree 修改
+
+已经执行：
+
+```bash
+git add file.cpp
+```
+
+但不希望它进入下一次 commit：
+
+```bash
+git restore --staged file.cpp
+```
+
+这会更新 index，而 working tree 中的修改仍然保留。
+
+因此：
+
+```text
+git restore <file>
+```
+
+和：
+
+```text
+git restore --staged <file>
+```
+
+操作的层次不同。
+
+## 修改最近一次 commit
+
+如果刚刚 commit 后发现：
+
+- commit message 写错
+- 漏掉了一个文件
+- 当前 commit 内容需要补充
+
+并且这段 history 仍然适合修改，可以使用：
+
+```bash
+git add forgotten-file
+git commit --amend
+```
+
+或者只修改 commit message：
+
+```bash
+git commit --amend
+```
+
+需要注意：
+
+**amend 会产生一个新的 commit，原 commit hash 会改变。**
+
+因此已经共享的 commit 是否应该 amend，需要先考虑是否会影响其他人的 history。
+
+## 理解 `reset --soft`、默认 reset 与 `reset --hard`
+
+假设：
+
+```text
+A -- B -- C
+          ^
+         HEAD
+```
+
+现在执行：
+
+```bash
+git reset HEAD~1
+```
+
+核心动作之一是让当前 branch 从 `C` 回到 `B`。
+
+不同 mode 决定 index 和 working tree 是否一起改变。
+
+### `git reset --soft`
+
+```bash
+git reset --soft HEAD~1
+```
+
+结果可以理解为：
+
+```text
+branch / HEAD：回到 B
+index：保留 C 对应的修改
+working tree：保留修改
+```
+
+适合：
+
+> commit 不想保留，但希望修改仍然 staged。
+
+### 默认 `git reset`
+
+```bash
+git reset HEAD~1
+```
+
+通常等价于：
+
+```bash
+git reset --mixed HEAD~1
+```
+
+结果：
+
+```text
+branch / HEAD：回到 B
+index：重置为 B
+working tree：保留修改
+```
+
+因此原来 `C` 中的修改重新变成 unstaged changes。
+
+### `git reset --hard`
+
+```bash
+git reset --hard HEAD~1
+```
+
+会同时更新：
+
+- 当前 branch
+- index
+- working tree
+
+使它们匹配目标 commit。
+
+因此可能直接覆盖尚未保存进 Git history 的 working tree 修改。
+
+执行前应该先检查：
+
+```bash
+git status
+git diff
+git diff --staged
+```
+
+不要把 `git reset --hard` 当作普通的“清理仓库”命令。
+
+## `reset` 与 `revert` 的区别
+
+假设：
+
+```text
+A -- B -- C
+```
+
+发现 `C` 是错误 commit。
+
+如果 `C` 仍然只是自己的本地 history，可以根据需要考虑：
+
+```bash
+git reset ...
+```
+
+它可以把当前 branch 移回较早的位置。
+
+但如果 `C` 已经进入需要保留的共享历史，通常更适合：
+
+```bash
+git revert C
+```
+
+`revert` 不会删除 `C`，而是创建一个新的 commit：
+
+```text
+A -- B -- C -- D
+```
+
+其中 `D` 用新的修改反转 `C` 带来的效果。
+
+因此可以建立下面的核心区别：
+
+| 命令 | 主要目的 |
+| --- | --- |
+| `git restore` | 恢复 working tree 或 index 中的文件内容 |
+| `git reset` | 调整当前 branch / HEAD，并根据 mode 调整 index、working tree |
+| `git revert` | 创建新 commit 来撤销已有 commit 的效果 |
+
+面对共享 history 时，`revert` 的关键价值是：
+
+> 保留已经发生的 commit history，通过新的 commit 表达撤销。
+
+## commit 看起来丢失时先检查 reflog
+
+假设原来：
+
+```text
+A -- B -- C
+```
+
+误执行：
+
+```bash
+git reset --hard HEAD~2
+```
+
+现在：
+
+```text
+main -> A
+```
+
+普通：
+
+```bash
+git log
+```
+
+可能已经看不到 `B` 和 `C`。
+
+这并不意味着应该立即认定 commit 已经无法恢复。
+
+Git 的 reflog 会记录本地 repository 中 branch tip、`HEAD` 等 references 的更新历史。
+
+先检查：
+
+```bash
+git reflog
+```
+
+可能看到类似：
+
+```text
+abcd123 HEAD@{0}: reset: moving to HEAD~2
+9876abc HEAD@{1}: commit: Add feature
+1234def HEAD@{2}: commit: Refactor parser
+```
+
+找到需要恢复的 commit 后，一个稳妥的做法是先创建 branch：
+
+```bash
+git branch rescue 9876abc
+```
+
+再确认：
+
+```bash
+git log --oneline --graph --decorate --all
+```
+
+确认目标 commit 已经重新被 branch reference 指向以后，再决定是否需要让原 branch 回到该 commit。
+
+恢复流程可以记成：
+
+```text
+发现 commit 看不到了
+→ 停止继续改写 history
+→ git reflog
+→ 找到目标 commit
+→ 创建 rescue branch
+→ 检查 history
+→ 再决定如何恢复原 branch
+```
+
+`reflog` 是本地 reference log，不应该把它当成永久备份机制。
+
+## 误删 branch 时怎样恢复
+
+执行：
+
+```bash
+git branch -D feature
+```
+
+删除的是 branch reference。
+
+如果该 branch 上的 commit 暂时没有其他 branch 或 tag 指向，它们可能不会出现在普通 branch history 中，但并不代表这些 Git objects 会在删除 branch 的瞬间立刻消失。
+
+刚刚误删 branch 时，可以优先检查：
+
+```bash
+git reflog
+```
+
+必要时：
+
+```bash
+git reflog --all
+```
+
+找到原 branch tip 后：
+
+```bash
+git branch feature-recovered <commit>
+```
+
+这里仍然体现了同一个恢复原则：
+
+<mark>先重新建立一个 reference 指向目标 commit，再继续进行其他历史操作。</mark>
+
+## push 被拒绝时怎样诊断
+
+如果：
+
+```bash
+git push
+```
+
+因为 non-fast-forward 被拒绝，不要第一时间：
+
+```bash
+git push --force
+```
+
+先：
+
+```bash
+git fetch origin
+git branch -vv
+git log --oneline --graph --decorate --all
+```
+
+然后判断：
+
+- remote 是否出现了本地没有的新 commit
+- 当前 branch 是否进行了 rebase
+- 是否正在 push 正确的 branch
+- upstream 是否配置正确
+
+如果只是双方产生分叉，需要根据团队 workflow 决定 merge 或 rebase。
+
+例如：
+
+```bash
+git rebase origin/main
+```
+
+或者：
+
+```bash
+git merge origin/main
+```
+
+## `--force-with-lease` 与 `--force`
+
+如果自己的 feature branch 已经 push，然后又进行了 rebase，那么 commit history 会发生变化，普通 push 可能被拒绝。
+
+如果项目明确允许重写这个 branch，可以使用：
+
+```bash
+git push --force-with-lease
+```
+
+相比：
+
+```bash
+git push --force
+```
+
+`--force-with-lease` 会增加对 remote ref 当前值的检查。当 remote branch 已经发生了自己没有预期到的变化时，push 可以被拒绝，而不是直接覆盖。
+
+但需要注意：
+
+<mark>`--force-with-lease` 并不意味着所有 force push 都自动安全。</mark>
+
+它仍然属于 history rewrite 场景。
+
+是否允许对某个 branch force push，首先应服从团队 workflow 和 branch protection 规则。
+
+## 如何阅读 Git history
+
+日常 Git 能力不只是“会提交”，还应该能够从 history 判断仓库发生了什么。
+
+### 查看整体 history
+
+```bash
+git log --oneline --graph --decorate --all
+```
+
+重点观察：
+
+- `HEAD`
+- local branches
+- remote-tracking branches
+- branch 分叉位置
+- merge commit
+
+### 查看一个 commit
+
+```bash
+git show <commit>
+```
+
+可以用于检查该 commit 的基本信息和具体修改。
+
+### 查看 working tree 修改
+
+```bash
+git diff
+```
+
+### 查看下一次 commit 准备提交的内容
+
+```bash
+git diff --staged
+```
+
+### 比较两个 commit
+
+```bash
+git diff <commit-a> <commit-b>
+```
+
+### 查看 `feature` 中 `main` 没有的 commits
+
+```bash
+git log main..feature
+```
+
+这里关注的是：
+
+> 能从 `feature` 到达，但不能从 `main` 到达的 commits。
+
+### 查看 feature 从分叉以后整体修改了什么
+
+```bash
+git diff main...feature
+```
+
+这里的三个点会使用 merge base 作为比较基准，因此很适合观察：
+
+> feature 相对于它和 main 的共同起点增加了哪些变化？
+
+需要注意：
+
+```bash
+git log A..B
+```
+
+和：
+
+```bash
+git diff A..B
+```
+
+虽然都出现 `..`，但属于不同命令的 revision / diff 语义，不应该仅根据符号把它们理解成完全相同的操作。
+
+## GitHub Pull Request 与 Git 本身要区分
+
+下面这些属于 Git：
+
+- commit
+- branch
+- merge
+- rebase
+- remote
+- fetch
+- push
+- tag
+
+而 Pull Request 是 GitHub 提供的协作功能。
+
+GitLab 中对应的协作概念通常称为 Merge Request。
+
+Pull Request 建立在 Git branch 和 commit history 之上，并进一步提供：
+
+- 代码审查
+- 讨论
+- CI / status checks
+- approval
+- branch protection
+- merge interface
+
+因此典型开发流程可以分为两层。
+
+Git 操作：
+
+```bash
+git switch -c feature/login
+
+# 修改代码
+
+git add <files>
+git commit -m "Add login validation"
+git push -u origin feature/login
+```
+
+之后：
+
+> 在 GitHub 上创建 Pull Request。
+
+创建、review、approve 和 merge Pull Request 属于 GitHub 的平台功能，而不是 Git command。
+
+## 团队 branch workflow
+
+一个常见的 branch-based collaboration 可以表示为：
 
 ```mermaid
 flowchart LR
-    A["main"] --> B["Bugfix Commit"]
-    B --> C["Cherry-pick"]
-    C --> D["release/1.1"]
-    C --> E["release/1.0"]
+    Main["main"]
+    Feature["feature branch"]
+    Remote["Remote Repository"]
+    PR["Pull Request<br/>GitHub 功能"]
+    Review["Review / CI<br/>GitHub 功能"]
+
+    Main -->|"git switch -c"| Feature
+    Feature -->|"git push"| Remote
+    Remote --> PR
+    PR --> Review
+    Review -->|"merge"| Main
 ```
 
-可以根据 Release Policy 将修复 Cherry-pick 到旧版本。
+本地开始开发前：
 
----
-## 60. Git四层模型
+```bash
+git switch main
+git fetch origin
+git merge --ff-only origin/main
+git switch -c feature/cache
+```
 
-可以把 Git 分成四层理解：
+开发并提交：
+
+```bash
+git add <files>
+git commit
+```
+
+如果 feature 开发期间 `main` 又发生了变化，根据项目 workflow 可以：
+
+```bash
+git fetch origin
+git rebase origin/main
+```
+
+或者：
+
+```bash
+git fetch origin
+git merge origin/main
+```
+
+然后 push feature branch：
+
+```bash
+git push -u origin feature/cache
+```
+
+至于 Pull Request 最终使用：
+
+- merge commit
+- squash merge
+- rebase merge
+
+属于 GitHub repository 的协作策略，应以具体项目规范为准。
+
+## Fork workflow 中的 `origin` 与 `upstream`
+
+Fork 是 GitHub 等代码托管平台提供的 repository-level 功能，不是 Git 本身的 object 或 branch 类型。
+
+GitHub 中，fork 是一个与 upstream repository 保持关联的独立 repository。
+
+在本地参与 fork-based workflow 时，常见配置是：
+
+```text
+origin   -> 自己的 fork
+upstream -> 原始 repository
+```
+
+检查：
+
+```bash
+git remote -v
+```
+
+如果尚未配置 upstream：
+
+```bash
+git remote add upstream <original-repository-url>
+```
+
+整体关系可以表示为：
 
 ```mermaid
-flowchart TD
-    A["Immutable Git Objects"] --> B["Commit DAG"]
-    B --> C["Mutable References<br/>Branch / HEAD"]
-    C --> D["Working Tree + Index"]
-    D --> E["Developer Operations<br/>add / commit / merge / rebase / reset"]
-    E --> F["PR / MR"]
-    F --> G["Review + CI"]
-    G --> H["Protected Main"]
+flowchart LR
+    Upstream["upstream<br/>原始 Repository"]
+    Local["Local Repository"]
+    Origin["origin<br/>自己的 Fork"]
+    PR["Pull Request<br/>GitHub 功能"]
+
+    Upstream -->|"git fetch upstream"| Local
+    Local -->|"git push origin"| Origin
+    Origin -->|"Create Pull Request"| PR
+    PR --> Upstream
 ```
 
-最底层：
+同步上游：
 
-> Git 保存对象和 Commit Graph。
+```bash
+git fetch upstream
+```
 
-中间：
+如果本地 `main` 没有自己的额外开发 history，可以：
 
-> Branch、HEAD 等 Reference 在 Commit Graph 上移动。
+```bash
+git switch main
+git merge --ff-only upstream/main
+```
 
-开发者操作：
+需要同步自己的 fork 时再：
 
-> `add`、`commit`、`merge`、`rebase`、`reset` 等操作修改 Index、创建 Commit 或移动 Reference。
+```bash
+git push origin main
+```
 
-生产协作：
+实际开发通常在 feature branch 上进行，而不是直接在自己的 `main` 上堆 feature commits：
 
-> PR / MR、CI、Review、Branch Protection 决定哪些修改可以进入共享历史。
+```bash
+git switch -c feature/new-kernel
+```
 
-理解这套模型之后，即使忘记某个具体 Git 参数，也可以根据操作目标快速判断应该查询和使用哪类命令。
+之后把 feature branch push 到自己的 fork，再通过 GitHub Pull Request 向 upstream repository 提交变更。
+
+## 常见问题应该怎样诊断
+
+### 修改了文件，但 commit 中没有
+
+检查：
+
+```bash
+git status
+git diff
+git diff --staged
+```
+
+确认修改是否真正进入 index。
+
+### `git diff` 没有输出，但 `git status` 显示有 staged 修改
+
+检查：
+
+```bash
+git diff --staged
+```
+
+因为默认：
+
+```bash
+git diff
+```
+
+比较的是 working tree 与 index。
+
+### `git fetch` 后代码没有变化
+
+这是正常情况。
+
+`fetch` 更新 remote-tracking branches，而不会自动修改当前 branch。
+
+查看：
+
+```bash
+git log --oneline --graph --decorate --all
+```
+
+然后再决定是否需要：
+
+```bash
+git merge origin/main
+```
+
+或者：
+
+```bash
+git rebase origin/main
+```
+
+### push 被拒绝
+
+先：
+
+```bash
+git fetch origin
+git branch -vv
+git log --oneline --graph --decorate --all
+```
+
+先看双方 history，而不是直接 force push。
+
+### 进入 detached HEAD
+
+检查：
+
+```bash
+git status
+```
+
+如果是为了查看某个 commit：
+
+```bash
+git switch --detach <commit>
+```
+
+进入 detached HEAD 本身并不是错误。
+
+如果在 detached HEAD 状态产生了需要保留的新 commit，可以在切走以前创建 branch：
+
+```bash
+git switch -c rescue-work
+```
+
+让 branch reference 指向当前 commit。
+
+### 不知道刚才的 Git 命令把仓库变成什么状态
+
+先：
+
+```bash
+git status
+```
+
+然后：
+
+```bash
+git log --oneline --graph --decorate --all
+```
+
+如果怀疑 branch 或 `HEAD` 的位置发生了错误移动：
+
+```bash
+git reflog
+```
+
+在理解当前状态以前，不要连续尝试：
+
+```text
+reset
+rebase
+force push
+```
+
+## 撤销与恢复速查
+
+| 当前问题 | 首先考虑 |
+| --- | --- |
+| 未 staged 的 tracked 修改不需要了 | `git restore <file>` |
+| staged 错文件但想保留修改 | `git restore --staged <file>` |
+| 最近 commit 内容或 message 需要修改 | `git commit --amend` |
+| 本地 commit 不想要，修改继续保持 staged | `git reset --soft` |
+| 本地 commit 不想要，修改保留为 unstaged | `git reset` |
+| commit 和 tracked 修改都确定不要 | `git reset --hard` |
+| 已共享 commit 需要反向撤销 | `git revert` |
+| rebase 做到一半需要取消 | `git rebase --abort` |
+| merge 做到一半需要取消 | `git merge --abort` |
+| reset / rebase 后 commit 看不到 | `git reflog` |
+| branch 误删 | `git reflog` 后重新建立 branch |
+| push non-fast-forward | `git fetch` 后检查双方 history |
+
+这张表不应该机械背诵。
+
+真正应该记住的问题是：
+
+> 我要改变的是 working tree、index、branch pointer，还是已经共享的 commit history？
+
+## 资料依据
+
+本文围绕实际开发能力恢复整理，核心依据为 Git 官方文档与 Pro Git。
+
+Git 官方资料入口：
+
+- [Git Reference](https://git-scm.com/docs)
+- [Pro Git](https://git-scm.com/book/en/v2)
+
+GitHub 官方资料入口：
+
+- [GitHub Docs](https://docs.github.com/)

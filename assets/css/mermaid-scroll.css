@@ -1,0 +1,109 @@
+/* Keep wide diagrams readable without widening the article. */
+.content .mermaid-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 1rem 0 0.65rem auto;
+  padding: 4px;
+  border: 1px solid var(--sidebar-border-color, #ddd);
+  border-radius: 12px;
+  background: var(--card-bg, var(--sidebar-bg));
+  box-shadow: 0 2px 8px rgb(0 0 0 / 5%);
+  font-size: 0.8rem;
+}
+
+.content .mermaid-controls button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-color);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.content .mermaid-controls button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.content .mermaid-controls button:hover {
+  background: var(--sidebar-hover-bg);
+  color: var(--link-color);
+}
+
+.content .mermaid-controls button:focus-visible {
+  outline: 2px solid var(--link-color, #0056b2);
+  outline-offset: 2px;
+}
+
+.content .mermaid-controls [role='status'] {
+  min-width: 3.8em;
+  text-align: center;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.content .mermaid-controls-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--sidebar-border-color, #ddd);
+}
+
+@media (pointer: coarse) {
+  .content .mermaid-controls button {
+    flex-basis: 40px;
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* Keep the space reserved so revealing controls never shifts the diagram. */
+@media (hover: hover) and (pointer: fine) {
+  .content .mermaid-controls {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  .content .mermaid-controls.is-hovered,
+  .content .mermaid-controls.diagram-focused,
+  .content .mermaid-controls:has(:focus-visible) {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content .mermaid-controls,
+  .content .mermaid-controls button { transition: none; }
+}
+
+.content .mermaid {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.content .mermaid > svg {
+  width: var(--mermaid-natural-width, 100%);
+  max-width: none !important;
+  height: auto;
+}
+
+.content .mermaid:focus-visible {
+  outline: 2px solid var(--link-color, #0056b2);
+  outline-offset: 2px;
+}
